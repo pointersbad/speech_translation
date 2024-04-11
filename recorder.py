@@ -41,13 +41,13 @@ class Recorder:
     while not self.messages.empty():
       chunk = self.recordings.get()
       if self.VAD:
-        threshold = self.VAD.apply_threshold(self.VAD(chunk), 0.7, 0.3)
+        y = self.VAD(chunk)
+        threshold = self.VAD.apply_threshold(y, 0.7, 0.3)
         silence = torch.sum(threshold) < threshold.size(1) / 4
         if silence:
           continue
       segment = self.cache(chunk)
       yield segment
-      time.sleep(0.1)
 
   def stop(self):
     self.messages.get()

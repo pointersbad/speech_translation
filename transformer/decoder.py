@@ -7,22 +7,40 @@ import re
 
 
 class HypothesisBuffer:
+  SEP = ' '
+
   def __init__(self):
-    self.offset = 0
     self.new = []
     self.buffer = []
     self.trunk = []
 
+  def __lcs(self, a, b):
+    m, n = (len(x) for x in (a, b))
+    L = [[None] * (n + 1) for _ in range(m + 1)]
+    for i in range(m + 1):
+      for j in range(n + 1):
+        if i == 0 or j == 0:
+          L[i][j] = 0
+        elif a[i - 1] == b[j - 1]:
+          L[i][j] = L[i - 1][j - 1] + 1
+        else:
+          L[i][j] = max(L[i - 1][j], L[i][j - 1])
+    return L[m][n]
+
   def __call__(self, new: list):
-    new = [(w, t + self.offset,) for w, t in new]
-    self.new = list(new)[len(self.trunk or (None,)) - 1:]
-    if len(self.new) == 0:
-      return torch.tensor([])
+    new = new.split(self.SEP)
+    if len(new) == 0:
+      return []
+    self.new = new[self.__lcs(new, self.trunk):]
+    print(
+        'N:', self.SEP.join(self.new), '\n'
+        'B:', self.SEP.join(self.buffer), '\n',
+    )
     cn = len(self.trunk)
     nn = len(self.new)
     for i in range(1, min(cn, nn, 5) + 1):
-      c = " ".join([str(self.trunk[-j][0]) for j in range(1, i + 1)][::-1])
-      tail = " ".join(str(self.new[j - 1][0]) for j in range(1, i + 1))
+      c = self.SEP.join([str(self.trunk[-j]) for j in range(1, i + 1)][::-1])
+      tail = self.SEP.join(str(self.new[j - 1]) for j in range(1, i + 1))
       if c == tail:
         for _ in range(i):
           self.new.pop(0)
@@ -32,26 +50,30 @@ class HypothesisBuffer:
   def __write(self):
     commit = []
     while self.new and len(self.buffer) != 0:
-      w, t = self.new[0]
-      if w != self.buffer[0][0]:
+      new_token, buffered_token = (
+          getattr(self, x)[0]
+          for x in ('new', 'buffer')
+      )
+      norm = (re.sub(r'\W+', '', x).lower()
+              for x in (new_token, buffered_token))
+      if len(set(norm)) > 1:
         break
-      commit.append((w, t))
-      self.offset = t
-      self.buffer.pop(0)
-      self.new.pop(0)
+      commit.append(new_token)
+      for x in ('new', 'buffer'):
+        getattr(self, x).pop(0)
     self.buffer = self.new
-    self.new = []
     self.trunk.extend(commit)
-    return torch.tensor([x[0] for x in commit])
+    return self.SEP.join(self.trunk)
 
 
 class Tokenizer:
+  SEP = ' '
+  PAD_IDX = 0
+  START_IDX = 1
+  END_IDX = 2
+
   def __init__(self, corpus: str, seq_length: int):
     self.seq_length = seq_length
-    self.START_IDX = 1
-    self.END_IDX = 2
-    self.PAD_IDX = 0
-
     special_tokens = ['<PAD>', '<SOS>', '<EOS>']
     words = sorted(list(set(corpus.split())))
     self.itos = [*special_tokens, *words]
@@ -61,7 +83,8 @@ class Tokenizer:
     raw = isinstance(x, str)
     dict_name = 'stoi' if raw else 'itos'
     pad = self.PAD_IDX if raw else self.itos[self.PAD_IDX]
-    x = ' '.join(re.findall(r'[А-яЁё]+', x)).lower().split(' ') if raw else x
+    if raw:
+      x = self.SEP.join(re.findall(r'[А-яЁё]+', x)).lower().split(' ')
     x = [getattr(self, dict_name)[token] for token in (_x for _x in x)]
     for _ in range(len(x), self.seq_length):
       x.append(pad)

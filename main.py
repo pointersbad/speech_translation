@@ -1,82 +1,86 @@
 import torch
-import numpy as np
 from recorder import Recorder
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from transformers import WhisperProcessor, WhisperForConditionalGeneration, MarianTokenizer, MarianMTModel
 from speechbrain.inference.VAD import VAD
 from transformer.decoder import HypothesisBuffer
 
-# device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 sample_rate = 16_000
-segment_length = sample_rate * 3
-context_length = sample_rate * 12
-hypothesize = True
-
-model_name = 'openai/whisper-small'
-cache_dir = 'pretrained_models'
-
+segment_length = sample_rate * 2
+context_length = sample_rate * 28
 print(f'Sample rate: {sample_rate}')
 print(f'Main segment: {segment_length / sample_rate} seconds')
 print(f'Right context: {context_length / sample_rate} seconds')
 
+cache_dir = 'pretrained_models'
+model_names = {
+    'speech2text': 'distil-whisper/distil-large-v3',
+    'text2text': 'Helsinki-NLP/opus-mt-en-ru'
+}
+
 VAD = VAD.from_hparams(
     source='speechbrain/vad-crdnn-libriparty',
-    savedir=f'{cache_dir}/vad-crdnn-libriparty'
-).to(device)
-processor = WhisperProcessor.from_pretrained(
-    model_name,
-    cache_dir,
+    savedir=f'{cache_dir}/vad-crdnn-libriparty',
+    run_opts={device: device}
 )
-model = WhisperForConditionalGeneration.from_pretrained(
-    model_name,
-    attn_implementation='eager',
+
+audio_processor = WhisperProcessor.from_pretrained(
+    model_names['speech2text'],
+    cache_dir=cache_dir
+)
+speech2text = WhisperForConditionalGeneration.from_pretrained(
+    model_names['speech2text'],
+    cache_dir=cache_dir,
+    use_safetensors=True,
+).to(device)
+
+text_tokenizer = MarianTokenizer.from_pretrained(
+    model_names['text2text'],
+    cache_dir=cache_dir
+)
+text2text = MarianMTModel.from_pretrained(
+    model_names['text2text'],
     cache_dir=cache_dir,
     use_safetensors=True
 ).to(device)
-model.config.forced_decoder_ids = processor.get_decoder_prompt_ids(
-    language='russian',
-    task='translate'
-)
-model = torch.compile(model)
-print(model)
 
 record = Recorder(sample_rate, segment_length, context_length, VAD)
 buffer = HypothesisBuffer()
-trunk = ''
+hypothesize = buffer is not None
+trunk = 'The recording has started.'
 
-for i, segment in enumerate(record()):
-  prompt_ids = processor.get_prompt_ids(trunk) if hypothesize else None
-  forgotten = max(i - (context_length + segment_length) / segment_length, 0)
-  input_features = processor(
-      segment[max(int((buffer.offset - forgotten) * segment_length), 0):],
+for t, segment in enumerate(record()):
+  prompt_ids = audio_processor.get_prompt_ids(
+      trunk,
+      return_tensors='pt'
+  ).to(device)
+  input_features = audio_processor(
+      segment,
       sampling_rate=sample_rate,
       return_tensors='pt'
   ).input_features
-  predicted_ids = model.generate(
+  output = speech2text.generate(
       input_features.to(device),
-      repetition_penalty=1.5,
-      renormalize_logits=True,
-      num_beams=2,
+      language='english',
+      task='transcribe',
       prompt_ids=prompt_ids,
-      return_token_timestamps=hypothesize
+      prompt_lookup_num_tokens=10,
+      do_sample=True
   )
 
-  if hypothesize:
-    ids = predicted_ids.sequences.numpy().astype(np.uint16)
-    timestamps = predicted_ids.token_timestamps.numpy().astype(np.float32)
-    timestamps = timestamps / (timestamps.max() or 1)
-    timestamped_ids = np.array([x.squeeze()for x in (ids, timestamps)]).T
-    timestamped_ids = filter(
-        lambda x: x[0] not in processor.tokenizer.all_special_ids,
-        timestamped_ids
-    )
-    hypothesis = processor.decode(buffer([*timestamped_ids]))
-    trunk += hypothesis
-    print(trunk)
-
-  transcription = processor.batch_decode(
-      predicted_ids.sequences if hypothesize else predicted_ids,
+  transcription = audio_processor.decode(
+      output[0],
+      prompt_ids=prompt_ids,
       skip_special_tokens=True
-  )
-  print(transcription[0])
+  )[len(trunk):]
+  print('Transcription:', transcription, end='\n\n')
+  trunk = buffer(transcription)
+
+  if not trunk:
+    continue
+  input_ids = text_tokenizer.encode(trunk, return_tensors="pt")
+  outputs = text2text.generate(input_ids.to(device))
+  translation = text_tokenizer.decode(outputs[0], skip_special_tokens=True)
+  print('Trunk:', trunk, end='\n\n')
+  print('Translation:', translation, end='\n\n')
