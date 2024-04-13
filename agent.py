@@ -10,10 +10,6 @@ import numpy
 
 @entrypoint
 class WaitK(SpeechToTextAgent):
-  """
-  The agent generate the number of seconds from an input audio.
-  """
-
   def __init__(self, k, src_segment_size,
                src_language, continuous, model, task):
     super().__init__(k)
