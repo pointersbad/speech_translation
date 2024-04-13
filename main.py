@@ -3,6 +3,7 @@ from recorder import Recorder
 from transformers import WhisperProcessor, WhisperForConditionalGeneration, M2M100Tokenizer, M2M100ForConditionalGeneration
 from speechbrain.inference.VAD import VAD
 from transformer.decoder import HypothesisBuffer
+from weights import model_names
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -14,10 +15,7 @@ print(f'Main segment: {segment_length / sample_rate} seconds')
 print(f'Right context: {context_length / sample_rate} seconds')
 
 cache_dir = 'pretrained_models'
-model_names = {
-    'speech2text': 'distil-whisper/distil-large-v3',
-    'text2text': 'kazandaev/m2m100_418M-finetuned-en-ru'
-}
+
 
 VAD = VAD.from_hparams(
     source='speechbrain/vad-crdnn-libriparty',

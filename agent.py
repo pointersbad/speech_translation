@@ -44,8 +44,6 @@ class WaitK(SpeechToTextAgent):
         fp16=False,
     )
 
-    # We encode the whole audio to get the full transcription each time a
-    # new audio chunk is received.
     audio = self.model.pad_or_trim(
         numpy.array(states.source).astype("float32"))
     mel = self.model.log_mel_spectrogram(audio).to(self.model.device)
