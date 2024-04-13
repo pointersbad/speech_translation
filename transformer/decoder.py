@@ -32,12 +32,11 @@ class HypothesisBuffer:
     new = new.split(self.SEP)
     if len(new) == 0:
       return []
-    print(new[:self.__lcs(new, self.trunk)])
     self.new = new[self.__lcs(new, self.trunk):]
-    print(
-        'N:', self.SEP.join(self.new), '\n'
-        'B:', self.SEP.join(self.buffer), '\n',
-    )
+    # print(
+    #     'N:', self.SEP.join(self.new), '\n'
+    #     'B:', self.SEP.join(self.buffer), '\n',
+    # )
     cn = len(self.trunk)
     nn = len(self.new)
     for i in range(1, min(cn, nn, 5) + 1):

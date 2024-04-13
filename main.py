@@ -1,6 +1,6 @@
 import torch
 from recorder import Recorder
-from transformers import WhisperProcessor, WhisperForConditionalGeneration, MarianTokenizer, MarianMTModel
+from transformers import WhisperProcessor, WhisperForConditionalGeneration, M2M100Tokenizer, M2M100ForConditionalGeneration
 from speechbrain.inference.VAD import VAD
 from transformer.decoder import HypothesisBuffer
 
@@ -16,7 +16,7 @@ print(f'Right context: {context_length / sample_rate} seconds')
 cache_dir = 'pretrained_models'
 model_names = {
     'speech2text': 'distil-whisper/distil-large-v3',
-    'text2text': 'Helsinki-NLP/opus-mt-en-ru'
+    'text2text': 'kazandaev/m2m100_418M-finetuned-en-ru'
 }
 
 VAD = VAD.from_hparams(
@@ -36,15 +36,15 @@ speech2text = WhisperForConditionalGeneration.from_pretrained(
     low_cpu_mem_usage=True
 ).to(device)
 
-text_tokenizer = MarianTokenizer.from_pretrained(
+text_tokenizer = M2M100Tokenizer.from_pretrained(
     model_names['text2text'],
     cache_dir=cache_dir
 )
-text2text = MarianMTModel.from_pretrained(
+text_tokenizer.src_lang = 'en'
+text2text = M2M100ForConditionalGeneration.from_pretrained(
     model_names['text2text'],
     cache_dir=cache_dir,
     use_safetensors=True,
-    low_cpu_mem_usage=True
 ).to(device)
 
 record = Recorder(sample_rate, segment_length, context_length, VAD)
@@ -74,8 +74,10 @@ for t, segment in enumerate(record()):
 
   if not trunk:
     continue
-  input_ids = text_tokenizer.encode(trunk, return_tensors="pt")
-  outputs = text2text.generate(input_ids.to(device))
+  input_ids = text_tokenizer.encode(trunk, return_tensors='pt')
+  outputs = text2text.generate(
+      input_ids.to(device),
+      forced_bos_token_id=text_tokenizer.get_lang_id('ru'))
   translation = text_tokenizer.decode(outputs[0], skip_special_tokens=True)
   print('Trunk:', trunk, end='\n\n')
   print('Translation:', translation, end='\n\n')
