@@ -21,7 +21,8 @@ class HypothesisBuffer:
       for j in range(n + 1):
         if i == 0 or j == 0:
           L[i][j] = 0
-        elif a[i - 1] == b[j - 1]:
+        elif len(set(re.sub(r'\W+', '', x).lower()
+                     for x in (a[i - 1], b[j - 1]))) == 1:
           L[i][j] = L[i - 1][j - 1] + 1
         else:
           L[i][j] = max(L[i - 1][j], L[i][j - 1])
@@ -31,6 +32,7 @@ class HypothesisBuffer:
     new = new.split(self.SEP)
     if len(new) == 0:
       return []
+    print(new[:self.__lcs(new, self.trunk)])
     self.new = new[self.__lcs(new, self.trunk):]
     print(
         'N:', self.SEP.join(self.new), '\n'
@@ -49,14 +51,21 @@ class HypothesisBuffer:
 
   def __write(self):
     commit = []
-    while self.new and len(self.buffer) != 0:
+    while self.new and self.buffer:
       new_token, buffered_token = (
           getattr(self, x)[0]
           for x in ('new', 'buffer')
       )
-      norm = (re.sub(r'\W+', '', x).lower()
-              for x in (new_token, buffered_token))
-      if len(set(norm)) > 1:
+      norm = [re.sub(r'\W+', '', x).lower()
+              for x in (new_token, buffered_token)]
+      try:
+        for norm_token, x in zip(norm, ('new', 'buffer')):
+          if len(norm_token) == 0:
+            getattr(self, x).pop(0)
+            raise Exception()
+      except Exception:
+        continue
+      if len(set(norm)) != 1:
         break
       commit.append(new_token)
       for x in ('new', 'buffer'):

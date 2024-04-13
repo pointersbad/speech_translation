@@ -33,6 +33,7 @@ speech2text = WhisperForConditionalGeneration.from_pretrained(
     model_names['speech2text'],
     cache_dir=cache_dir,
     use_safetensors=True,
+    low_cpu_mem_usage=True
 ).to(device)
 
 text_tokenizer = MarianTokenizer.from_pretrained(
@@ -42,7 +43,8 @@ text_tokenizer = MarianTokenizer.from_pretrained(
 text2text = MarianMTModel.from_pretrained(
     model_names['text2text'],
     cache_dir=cache_dir,
-    use_safetensors=True
+    use_safetensors=True,
+    low_cpu_mem_usage=True
 ).to(device)
 
 record = Recorder(sample_rate, segment_length, context_length, VAD)
@@ -51,10 +53,6 @@ hypothesize = buffer is not None
 trunk = 'The recording has started.'
 
 for t, segment in enumerate(record()):
-  prompt_ids = audio_processor.get_prompt_ids(
-      trunk,
-      return_tensors='pt'
-  ).to(device)
   input_features = audio_processor(
       segment,
       sampling_rate=sample_rate,
@@ -64,16 +62,13 @@ for t, segment in enumerate(record()):
       input_features.to(device),
       language='english',
       task='transcribe',
-      prompt_ids=prompt_ids,
       prompt_lookup_num_tokens=10,
-      do_sample=True
   )
 
   transcription = audio_processor.decode(
       output[0],
-      prompt_ids=prompt_ids,
       skip_special_tokens=True
-  )[len(trunk):]
+  )
   print('Transcription:', transcription, end='\n\n')
   trunk = buffer(transcription)
 
