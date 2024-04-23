@@ -1,18 +1,28 @@
-from torch.optim.lr_scheduler import LambdaLR
+import torch
+from torch.utils.data import DataLoader
 from torch.optim.swa_utils import SWALR, AveragedModel, update_bn
+from torch.optim import Optimizer
+from torch.nn import Module
+from torch.optim.lr_scheduler import LRScheduler
 
 
 class Sequential:
-  def __init__(self, schedulers, milestones=(), verbose=False):
+  def __init__(
+      self,
+      schedulers: list[LRScheduler],
+      milestones: tuple[int] = (),
+      verbose=False
+  ):
     self.schedulers, self.milestones = (
         x if isinstance(x, (list, tuple))
-        else (x,) for x in (schedulers, milestones))
+        else (x,) for x in (schedulers, milestones)
+    )
     self.verbose = verbose
     self.running_lr = []
     self.current_step = 0
     self.i = 0
 
-  def get(self, name):
+  def get(self, name: str):
     scheduler_names = [s.__class__.__name__ for s in self.schedulers]
     si = scheduler_names.index(name) if name in scheduler_names else None
     scheduler = self.schedulers[si] if si else si
@@ -25,6 +35,7 @@ class Sequential:
       self.running_lr.append(lr)
       print(f"Applied learning rates: {lr}")
     self.current_step += 1
+
     guard = self.i < len(self.milestones)
     if guard and self.current_step ==\
             self.milestones[self.i] + sum(self.milestones[:self.i]):
@@ -51,7 +62,7 @@ class Sequential:
 
 
 class SWA:
-  def __init__(self, optimizer, lrs, model):
+  def __init__(self, optimizer: Optimizer, lrs: float, model: Module):
     self.scheduler = SWALR(optimizer, lrs)
     self.model = model
     averaged_model = AveragedModel(self.model)
@@ -62,7 +73,7 @@ class SWA:
     self.averaged_model.update_parameters(self.model)
     self.scheduler.step()
 
-  def update_bn(self, loader, device):
+  def update_bn(self, loader: DataLoader, device: torch.device):
     update_bn(loader, self.averaged_model, device)
 
   def state_dict(self):
@@ -72,7 +83,7 @@ class SWA:
     }
     return state_dict
 
-  def load_state_dict(self, state_dict):
+  def load_state_dict(self, state_dict: dict):
     self.scheduler.load_state_dict(state_dict['scheduler'])
 
   def __getattr__(self, attr):

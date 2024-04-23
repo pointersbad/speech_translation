@@ -1,54 +1,62 @@
-import os
+import torch
+import soundfile as sf
+import yaml
+from itertools import groupby
 from torch.utils.data import Dataset
-import torchaudio
-
-config = {}
 
 
-class MustCDataset(Dataset):
-  def init(
-      self,
-      split,
-      sample_rate,
-      n_mels,
+class MuSTC(Dataset):
+  def __init__(
+      self, root: str,
+      audio_processor,
       tokenizer,
-      pad_idx,
-      eos_idx
+      sample_rate,
+      validation=False
   ):
-    self.root_dir = os.path.join('data/must-c', split)
-    self.audio_dir = os.path.join(self.root_dir, 'audio')
-    self.text_dir = os.path.join(self.root_dir, 'text')
-    self.sample_rate = sample_rate
-    self.n_mels = n_mels
-    self.tokenizer = tokenizer
-    self.pad_idx = pad_idx
-    self.eos_idx = eos_idx
+    split = 'dev' if validation else 'train'
+    root = f'{root}/en-ru/data/split'
+    wav_root, txt_root = (f'{root}/{p}' for p in ('wav', 'txt'))
+    assert root.is_dir() and wav_root.is_dir() and txt_root.is_dir()
+    with open(f'{txt_root}/{split}.yaml') as f:
+      segments = yaml.load(f, Loader=yaml.BaseLoader)
+    for lang in ('en', 'ru'):
+      with open(f'{txt_root}/{split}.{lang}') as f:
+        utterances = [r.strip() for r in f]
+      for i, u in enumerate(utterances):
+        segments[i][lang] = u
+
+    self.data = []
+    for wav_filename, _seg_group in groupby(segments, lambda x: x['wav']):
+      wav_path = f'{wav_root}/{wav_filename}'
+      sample_rate = sf.info(wav_path.as_posix()).samplerate
+      seg_group = sorted(_seg_group, key=lambda x: x['offset'])
+      for i, segment in enumerate(seg_group):
+        offset = int(float(segment['offset']) * sample_rate)
+        n_frames = int(float(segment['duration']) * sample_rate)
+        self.data.append((
+            wav_path.as_posix(),
+            offset,
+            n_frames,
+            sample_rate,
+            segment['en'],
+            segment['ru'],
+        ))
+      self.audio_processor = audio_processor
+      self.tokenizer = tokenizer
+
+  def __getitem__(self, n: int):
+    wav_path, offset, n_frames, sample_rate, src, tgt = self.data[n]
+    waveform, _ = sf.read(
+        wav_path,
+        dtype='float32',
+        samplerate=sample_rate,
+        always_2d=True,
+        frames=n_frames,
+        start=offset
+    )
+    waveform = torch.from_numpy(waveform.T)
+    src, tgt = (self.tokenizer(x) for x in (src, tgt))
+    return self.audio_processor(waveform), src, tgt, sample_rate
 
   def __len__(self):
-    filenames = (f.split('.')[0] for f in os.listdir(
-        self.audio_dir) if f.endswith('.wav'))
-    return len(filenames)
-
-  def __getitem__(self, idx):
-    filename = self.filenames[idx]
-    audio_path = os.path.join(self.audio_dir, f"{filename}.wav")
-    text_path = os.path.join(self.text_dir, f"{filename}.txt")
-    waveform, sr = torchaudio.load(audio_path)
-    if sr != self.sample_rate:
-      resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
-      waveform = resampler(waveform)
-    mel_spectrogram = torchaudio.transforms.MelSpectrogram(
-        sample_rate=self.sample_rate, n_mels=self.n_mels)(waveform)
-    with open(text_path, 'r', encoding='utf-8') as f:
-      text = f.readline().strip()
-    tokens = self.tokenizer(
-        text,
-        return_tensors='pt',
-        padding='max_length',
-        max_length=512,
-        truncation=True)
-    return {
-        'audio': mel_spectrogram.squeeze(0),
-        'text': tokens.input_ids.squeeze(0),
-        'attention_mask': tokens.attention_mask.squeeze(0)
-    }
+    return len(self.data)

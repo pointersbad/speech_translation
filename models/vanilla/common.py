@@ -30,7 +30,7 @@ class LayerNormalization(nn.Module):
     self.beta = nn.Parameter(torch.zeros(shape))
 
   def forward(self, x: torch.Tensor):
-    dims = [-(i + 1) for i in range(len(self.shape))]
+    dims = (-(i + 1) for i in range(len(self.shape)))
     mean = x.mean(dim=dims, keepdim=True)
     var = ((x - mean) ** 2).mean(dim=dims, keepdim=True)
     std = (var + self.eps).sqrt()

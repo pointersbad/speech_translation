@@ -22,6 +22,6 @@ class Transformer(nn.Module):
     self.softmax = nn.Softmax(2)
 
   def forward(self, x, y):
-    x = self.encoder(x)
-    x = self.decoder(x, y)
-    return self.linear(x), x.detach()
+    encoder_out = self.encoder(x)
+    decoder_out = self.decoder(encoder_out, y)
+    return self.linear(x), encoder_out, decoder_out
